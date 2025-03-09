@@ -1,0 +1,37 @@
+[package]
+name = "wallpaper_changer"
+version = "0.1.0"
+edition = "2021"
+build = "src/build.rs"
+
+[dependencies]
+chrono = { version = "0.4.19", features = ["serde"] }
+dirs = "4.0.0"
+env_logger = "0.11.6"
+ftail = "0.2.1"
+# Disable IDNA
+idna_adapter = "=1.0.0"
+image = "0.24.9"
+imageproc = "0.23.0"
+log = "0.4"
+macros = { path = "../macros" }
+multi_log = "0.1.2"
+rusttype = "0.9.2"
+rand = "0.8.4"
+screen_size = "0.1.0"
+sentry = { version = "0.36.0", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "ureq"] }
+sentry-log = "0.36.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_derive = "1.0"
+serde_json = "1.0.64"
+tempfile = "3.18.0"
+toml = "0.5.8"
+ureq = { version = "3", features = ["brotli"] }
+url = "2.5.4"
+wallpaper = "3.2.0"
+
+[build-dependencies]
+ureq = { version = "3", features = ["brotli"] }
+
+[lints]
+workspace = true
