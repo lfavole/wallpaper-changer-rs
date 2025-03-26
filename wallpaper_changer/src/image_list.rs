@@ -2,6 +2,7 @@ use crate::get_screen_size;
 use crate::image_structs::Image;
 use crate::image_structs::LocalImage;
 use crate::image_structs::OnlineImage;
+use crate::paths::Paths;
 
 use super::Config;
 use super::NoImagesError;
@@ -9,22 +10,25 @@ use image::DynamicImage;
 use image::GenericImageView;
 use image::ImageDecoder;
 use image::ImageReader;
+use log::debug;
+use log::info;
 use rand::seq::IteratorRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::error::Error;
+use std::ffi::OsStr;
 use std::fs;
-use std::io::copy;
 use std::path::Path;
 use std::path::PathBuf;
-use url::Url;
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
 /// Data for the online images stored on disk.
 pub(crate) struct ImageData {
-    urls: Vec<OnlineImage>,
-    current_index: usize,
+    pub(crate) urls: Vec<OnlineImage>,
+    pub(crate) current_index: usize,
+    pub(crate) needs_downloading: bool,
 }
 
 impl ImageData {
@@ -34,21 +38,19 @@ impl ImageData {
     /// Fails if the image data directory can't be determined
     /// or if the file is malformed.
     pub(crate) fn load() -> Result<Self, Box<dyn Error>> {
-        let data_path = dirs::data_local_dir()
-            .ok_or("Could not find the local data directory")?
-            .join("wallpaper-changer-rs/image_data.json");
+        let data_path = Paths::image_data_path();
+        debug!("Loading image data from {:?}", data_path);
 
         let ret = if data_path.exists() {
             let image_data = serde_json::from_reader(fs::File::open(data_path)?)?;
+            debug!("Image data loaded");
             Ok(image_data)
         } else {
-            Ok(Self {
-                urls: Vec::new(),
-                current_index: 0,
-            })
+            debug!("Image data file not found, using default values");
+            Ok(Self::default())
         };
         if let Ok(ref data) = ret {
-            println!(
+            info!(
                 "Loaded {} images from the cache, current index is {}",
                 data.urls.len(),
                 data.current_index
@@ -57,31 +59,13 @@ impl ImageData {
         ret
     }
 
-    /// Returns the path to the image data file.
-    ///
-    /// # Errors
-    /// Fails if the image data directory can't be determined.
-    pub(crate) fn get_data_path() -> Result<PathBuf, Box<dyn Error>> {
-        Ok(dirs::data_local_dir()
-            .ok_or("Could not find the local data directory")?
-            .join("wallpaper-changer-rs/image_data.json"))
-    }
-
     /// Saves the image data to its file.
     ///
     /// # Errors
-    /// Fails if the image data directory can't be determined, created
-    /// or if the file can't be written to.
+    /// Fails if the file can't be written to.
     pub(crate) fn store(&self) -> Result<(), Box<dyn Error>> {
-        let data_path = Self::get_data_path()?;
-
-        // Create the parent directory if needed
-        if let Some(parent) = data_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        serde_json::to_writer(fs::File::create(&data_path)?, self)?;
-
-        Ok(())
+        debug!("Storing image data to {:?}", Paths::image_data_path());
+        Ok(serde_json::to_writer(fs::File::create(Paths::image_data_path())?, self)?)
     }
 
     /// Deletes all the images in this [`ImageData`].
@@ -90,17 +74,55 @@ impl ImageData {
     /// Fails if an image or the data file can't be deleted.
     pub(crate) fn clear(&mut self) -> Result<(), Box<dyn Error>> {
         for image in &self.urls {
-            if let Ok(path) = image.get_path() {
-                if path.exists() {
-                    fs::remove_file(path)?;
-                }
+            let path = image.get_path();
+            if path.exists() {
+                debug!("Removing image {:?}", path);
+                fs::remove_file(path)?;
+            } else {
+                debug!("Image {:?} not found", path);
             }
         }
         // Remove the file
-        let data_path = Self::get_data_path()?;
+        let data_path = Paths::image_data_path();
         if data_path.exists() {
+            debug!("Removing image data file {:?}", data_path);
             fs::remove_file(data_path)?;
+        } else {
+            debug!("Image data file {:?} not found", data_path);
         }
+        Ok(())
+    }
+
+    /// Downloads all the images in this [`ImageData`].
+    ///
+    /// # Errors
+    /// Fails if an image can't be downloaded.
+    pub(crate) fn download_all_images(&self) -> Result<(), Box<dyn Error>> {
+        for image in &self.urls {
+            image.download()?;
+        }
+        Ok(())
+    }
+
+    /// Deletes all the old images in the directory of the first image.
+    ///
+    /// # Errors
+    /// Fails if an image can't be deleted.
+    pub(crate) fn delete_old_images(&self) -> Result<(), Box<dyn Error>> {
+        let image_paths = self.urls.iter().map(super::image_structs::Image::get_path).collect::<Vec<_>>();
+        debug!("Found {} images to keep", image_paths.len());
+        let mut removed_images: usize = 0;
+        for entry in fs::read_dir(Paths::downloaded_pictures_dir())? {
+            let path = entry?.path();
+            if path.is_file() && image_paths.iter().all(|image_path| path != *image_path) {
+                debug!("Removing old image {:?}", path);
+                fs::remove_file(path)?;
+                removed_images += 1;
+            } else {
+                debug!("Keeping image {:?}", path);
+            }
+        }
+        info!("Removed {} old images", removed_images);
         Ok(())
     }
 }
@@ -113,8 +135,10 @@ impl ImageData {
 pub(crate) fn download_pictures(config: &Config) -> Result<Vec<OnlineImage>, Box<dyn Error>> {
     #[expect(clippy::unwrap_used)]
     let mut url = url::Url::parse(if config.api_key.is_empty() {
+        debug!("No API key found, using the lfnewtab API");
         "https://lfnewtab.vercel.app/unsplash/"
     } else {
+        debug!("Using the Unsplash API");
         "https://api.unsplash.com/"
     })
     .unwrap();
@@ -124,10 +148,13 @@ pub(crate) fn download_pictures(config: &Config) -> Result<Vec<OnlineImage>, Box
         .split(',')
         .choose(&mut rand::rng())
         .unwrap_or_default();
+
     if search_term.is_empty() || search_term == "random" {
+        debug!("Search term is {:?}, getting random images", search_term);
         url.set_path(&(url.path().to_string() + "photos/random"));
         url.query_pairs_mut().append_pair("count", config.images_per_download.to_string().as_str());
     } else {
+        debug!("Searching for images with the term: {search_term:?}");
         url.set_path(&(url.path().to_string() + "search/photos"));
         url.query_pairs_mut().append_pair("query", search_term);
         url.query_pairs_mut().append_pair("per_page", config.images_per_download.to_string().as_str());
@@ -141,63 +168,26 @@ pub(crate) fn download_pictures(config: &Config) -> Result<Vec<OnlineImage>, Box
     let response = ureq::get(url.as_str()).call()?;
     let response: Value = serde_json::from_reader(response.into_body().as_reader())?;
 
-    let mut image_urls = Vec::new();
-    let images = if response.is_array() {
+    let image_urls = if response.is_array() {
         response.as_array()
     } else {
         response["results"].as_array()
-    }.ok_or("Error parsing response")?;
-    for image in images {
-        image_urls.push(OnlineImage::from(image));
-    }
+    }.ok_or("Error parsing response")?
+    .iter()
+    .map(OnlineImage::from)
+    .collect::<Vec<_>>();
+    debug!("Downloaded {} images", image_urls.len());
 
     Ok(image_urls)
-}
-
-/// Download an [`OnlineImage`] to its destination file.
-///
-/// # Errors
-/// Fails if the URL can't be edited or if the destination file can't be written to.
-pub(crate) fn download_image(image: &OnlineImage) -> Result<(), Box<dyn Error>> {
-    let mut image_url = Url::parse(&image.url)?;
-    // Keep only the ixid parameter
-    let ixid = image_url
-        .query_pairs()
-        .find(|(key, _)| key == "ixid")
-        .map(|(_, value)| value.to_string());
-    image_url.query_pairs_mut().clear();
-    if let Some(value) = ixid {
-        image_url.query_pairs_mut().append_pair("ixid", &value);
-    }
-    let screen_dimensions = get_screen_size();
-    image_url
-        .query_pairs_mut()
-        .append_pair("fm", "jpg")
-        .append_pair("q", "85")
-        .append_pair("w", &screen_dimensions.0.to_string())
-        .append_pair("h", &screen_dimensions.1.to_string())
-        .append_pair("fit", "crop")
-        .append_pair("crop", "faces,edges");
-    let image_response = ureq::get(image_url.to_string()).call()?;
-    // Create the parent directory if needed
-    if let Some(parent) = image.get_path()?.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut image_file = fs::File::create(image.get_path()?)?;
-    copy(&mut image_response.into_body().as_reader(), &mut image_file)?;
-
-    Ok(())
 }
 
 /// Selects a random image, downloads it and returns it.
 ///
 /// # Errors
 /// Fails if the local or web images can't be obtained or downloaded.
-#[expect(clippy::missing_panics_doc)]
 pub(crate) fn select_random_image(
     config: &Config,
     image_data: &mut ImageData,
-    pictures_dir: &Path,
 ) -> Result<Box<dyn Image>, Box<dyn Error>> {
     let mut rng = rand::rng();
 
@@ -205,58 +195,14 @@ pub(crate) fn select_random_image(
     let use_local_image = rng.random::<bool>();
 
     if use_local_image {
-        println!("Getting local images...");
-        let local_images = get_images(pictures_dir)?;
-
-        if !local_images.is_empty() {
-            for _ in 0..10000 {
-                // Select a random local image
-                #[expect(clippy::unwrap_used)]
-                let image_path = local_images.iter().choose(&mut rng).unwrap().clone();
-                if is_too_vertical(&image_path) {
-                    println!("Skipping {image_path:?} because it's too vertical");
-                    continue;
-                }
-                println!("Selecting {image_path:?}");
-                return Ok(Box::new(LocalImage::from(image_path)));
-            }
+        if let Ok(ret) = LocalImage::get(config, image_data) {
+            return Ok(ret);
         }
     }
 
     if !use_local_image {
-        // Check if we need to download new images
-        if image_data.current_index >= image_data.urls.len() {
-            println!("Downloading pictures from Unsplash...");
-            // Download random pictures from Unsplash
-            match download_pictures(config) {
-                Ok(image_urls) => {
-                    // Clear the old images
-                    image_data.clear()?;
-                    // Store new images and reset current index
-                    *image_data = ImageData {
-                        urls: image_urls,
-                        current_index: 0,
-                    };
-                    println!("{} pictures downloaded", image_data.urls.len());
-                    image_data.store()?;
-                }
-                Err(err) => println!("Error: {err}"),
-            }
-        }
-
-        if image_data.current_index < image_data.urls.len() {
-            // Use the current online image
-            let current_image = image_data.urls[image_data.current_index].clone();
-
-            if !current_image.get_path()?.exists() {
-                download_image(&current_image)?;
-            }
-
-            // Increment the current index and store it
-            image_data.current_index += 1;
-            image_data.store()?;
-
-            return Ok(Box::new(current_image));
+        if let Ok(ret) = OnlineImage::get(config, image_data) {
+            return Ok(ret);
         }
     }
 
@@ -288,12 +234,7 @@ pub(crate) fn get_images_no_cache(pictures_dir: &Path) -> Result<Vec<PathBuf>, B
 /// # Errors
 /// Fails if the cache directory can't be found or created or if a directory can't be read.
 pub(crate) fn get_images(pictures_dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Error>> {
-    let cache_path = dirs::data_local_dir()
-        .ok_or("Could not find the local data directory")?
-        .join(format!("wallpaper-changer-rs/path_cache/{}", pictures_dir.to_string_lossy().replace(['\\', '/'], "_")));
-    if let Some(parent) = cache_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let cache_path = Paths::get_path_cache_file_path(pictures_dir);
     // if the change time of the folder is newer than the cache file, regenerate the cache
     // otherwise, read the cache file and return the paths
     if let Ok(metadata) = fs::metadata(pictures_dir) {
@@ -323,18 +264,18 @@ pub(crate) fn get_images(pictures_dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Er
     Ok(images)
 }
 
+/// Returns `true` if the file is an image.
 pub(crate) fn is_image(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|ext| ext.to_str()),
-        Some("png" | "jpg" | "jpeg" | "bmp" | "gif")
-    )
+    ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
+        .map(OsStr::new)
+        .contains(&path.extension().unwrap_or_default())
 }
 
 /// Opens an image file and rotates it according to its EXIF metadata.
 ///
 /// # Errors
 /// Fails if the image can't be opened or if its orientation can't be determined.
-pub(crate) fn open_image(path: &Path) -> Result<DynamicImage, Box<dyn std::error::Error>> {
+pub(crate) fn open_image(path: &Path) -> Result<DynamicImage, Box<dyn Error>> {
     // Rotate the image according to its EXIF metadata
     let mut decoder = ImageReader::open(path)?.into_decoder()?;
     let orientation = decoder.orientation()?;
@@ -349,12 +290,18 @@ pub(crate) fn open_image(path: &Path) -> Result<DynamicImage, Box<dyn std::error
 pub(crate) fn is_too_vertical(path: &Path) -> bool {
     #[expect(clippy::cast_precision_loss)]
     if let Ok(img) = open_image(path) {
+        debug!("Opened image {:?}", path);
         let dimensions = img.dimensions();
+        debug!("Image dimensions: {:?}", dimensions);
         let screen_size = get_screen_size();
+        debug!("Screen size: {:?}", screen_size);
 
-        (dimensions.1 as f32 / dimensions.0 as f32) / (screen_size.1 as f32 / screen_size.0 as f32)
-            > 1.5
+        let ret = (dimensions.1 as f32 / dimensions.0 as f32) / (screen_size.1 as f32 / screen_size.0 as f32)
+            > 1.5;
+        debug!("Result: {}", ret);
+        ret
     } else {
+        debug!("Couldn't open image {:?}", path);
         false
     }
 }

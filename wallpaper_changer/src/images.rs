@@ -6,6 +6,7 @@ use image::GenericImageView;
 use image::Rgba;
 use image::RgbaImage;
 use imageproc::drawing::{draw_text_mut, text_size as get_text_size};
+use log::info;
 use std::env;
 use std::error::Error;
 
@@ -22,7 +23,7 @@ pub(crate) fn write_text_on_image(
     if label_position == "none" {
         return Ok(());
     }
-    println!("Writing text on image...");
+    info!("Writing text on image...");
 
     let font_data = include_bytes!(concat!(env!("OUT_DIR"), "/Montserrat-Bold.ttf"));
     let font = FontRef::try_from_slice(font_data)?;

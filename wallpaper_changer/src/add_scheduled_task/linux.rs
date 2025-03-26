@@ -5,6 +5,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use crate::Paths;
+
 /// Registers the given `script_path` as a scheduled task on Linux.
 ///
 /// # Errors
@@ -22,7 +24,7 @@ pub(crate) fn register_task(script_path: &Path) -> Result<(), Box<dyn Error>> {
 
     // Ensure the script is not already registered
     if cron_content.contains(&*script_path.to_string_lossy()) {
-        println!("The script is already registered as a cron job.");
+        info!("The script is already registered as a cron job.");
         return Ok(());
     }
 
@@ -30,15 +32,13 @@ pub(crate) fn register_task(script_path: &Path) -> Result<(), Box<dyn Error>> {
     cron_content.push_str(&format!("*/5 * * * * {}\n", script_path.to_string_lossy()));
 
     // Create a temporary file
-    let cron_file = dirs::data_local_dir()
-        .ok_or("Could not find the data directory")?
-        .join("wallpaper-changer-rs/crontab");
+    let cron_file = Paths::crontab_temp_file();
     if let Some(parent) = cron_file.parent() {
         fs::create_dir_all(parent)?;
     }
 
     fs::write(&cron_file, cron_content)?;
-    Command::new("crontab").arg(cron_file.as_path()).output()?;
+    Command::new("crontab").arg(cron_file).output()?;
 
     fs::remove_file(cron_file)?;
 
@@ -62,7 +62,7 @@ pub(crate) fn unregister_task(script_path: &Path) -> Result<(), Box<dyn Error>> 
 
     // Ensure the script is registered
     if !cron_content.contains(&*script_path.to_string_lossy()) {
-        println!("The script is not registered as a cron job.");
+        info!("The script is not registered as a cron job.");
         return Ok(());
     }
 
@@ -74,15 +74,13 @@ pub(crate) fn unregister_task(script_path: &Path) -> Result<(), Box<dyn Error>> 
         .join("\n");
 
     // Create a temporary file
-    let cron_file = dirs::data_local_dir()
-        .ok_or("Could not find the data directory")?
-        .join("wallpaper-changer-rs/crontab");
+    let cron_file = Paths::crontab_temp_file();
     if let Some(parent) = cron_file.parent() {
         fs::create_dir_all(parent)?;
     }
 
     fs::write(&cron_file, cron_content)?;
-    Command::new("crontab").arg(cron_file.as_path()).output()?;
+    Command::new("crontab").arg(cron_file).output()?;
 
     fs::remove_file(cron_file)?;
 

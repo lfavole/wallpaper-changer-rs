@@ -1,4 +1,4 @@
-use log::debug;
+use log::{debug, info};
 use std::error::Error;
 use std::path::Path;
 use std::process::Command;
@@ -12,7 +12,7 @@ extern "C" {
 /// # Errors
 /// Fails if the call to `gsettings` fails.
 pub(crate) fn set_background(image_path: &Path) -> Result<(), Box<dyn Error>> {
-    println!("Setting background...");
+    info!("Setting background...");
     let uid = unsafe { getuid() };
     debug!("uid is {}", uid);
     Command::new("gsettings")

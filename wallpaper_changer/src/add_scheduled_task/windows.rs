@@ -1,4 +1,5 @@
 //! Utility functions to register the wallpaper changer as a scheduled task on Windows.
+use log::info;
 use std::error::Error;
 use std::io;
 use std::path::Path;
@@ -18,7 +19,7 @@ pub(crate) fn register_task(script_path: &Path) -> Result<(), Box<dyn Error>> {
         .status()?;
 
     if status.success() {
-        println!("Task '{task_name}' is already registered.");
+        info!("Task '{task_name}' is already registered.");
         return Ok(());
     }
 
@@ -47,7 +48,7 @@ pub(crate) fn register_task(script_path: &Path) -> Result<(), Box<dyn Error>> {
         )));
     }
 
-    println!("Task '{task_name}' created successfully.");
+    info!("Task '{task_name}' created successfully.");
 
     Ok(())
 }
@@ -66,7 +67,7 @@ pub(crate) fn unregister_task(script_path: &Path) -> Result<(), Box<dyn Error>> 
         .status()?;
 
     if !status.success() {
-        println!("Task '{task_name}' is not registered.");
+        info!("Task '{task_name}' is not registered.");
         return Ok(());
     }
 
@@ -85,7 +86,7 @@ pub(crate) fn unregister_task(script_path: &Path) -> Result<(), Box<dyn Error>> 
         )));
     }
 
-    println!("Task '{task_name}' deleted successfully.");
+    info!("Task '{task_name}' deleted successfully.");
 
     Ok(())
 }

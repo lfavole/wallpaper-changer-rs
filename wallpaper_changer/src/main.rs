@@ -4,18 +4,17 @@ use config::Config;
 use ftail::channels::console::ConsoleLogger;
 use ftail::channels::daily_file::DailyFileLogger;
 use image::imageops::FilterType;
-use log::{debug, LevelFilter};
+use log::info;
+use log::{debug, error, LevelFilter};
 use macros::compile_env;
-use rand::distr::Alphanumeric;
-use rand::Rng;
+use paths::Paths;
 use add_scheduled_task::{register_task, unregister_task};
 use screen_size::get_screen_size;
 use sentry_log::LogFilter;
 use std::env;
 use std::error::Error;
 use std::fmt;
-use std::fs::{self, create_dir_all};
-use std::path::Path;
+use std::fs;
 
 #[derive(Debug)]
 /// An error that is raised when no images are available.
@@ -29,20 +28,20 @@ impl fmt::Display for NoImagesError {
 
 impl Error for NoImagesError {}
 
+/// The real entry point for the program.
+fn main() {
+    match real_main() {
+        Ok(()) => {},
+        Err(err) => error!("Error: {err}"),
+    }
+}
+
 /// Changes the wallpaper or registers itself as a scheduled task if the "register" argument is provided.
 ///
 /// # Errors
 /// The program can fail for a number of reasons.
-fn main() -> Result<(), Box<dyn Error>> {
-    let dsn = compile_env!("SENTRY_DSN");
-    let _guard = sentry::init((
-        dsn,
-        sentry::ClientOptions {
-            release: sentry::release_name!(),
-            traces_sample_rate: 0.1,
-            ..Default::default()
-        },
-    ));
+fn real_main() -> Result<(), Box<dyn Error>> {
+    log_panics::init();
 
     // Initialize the logger
     let logger1 = ConsoleLogger::new(ftail::Config {
@@ -50,13 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ..Default::default()
     });
 
-    let logger_dir = dirs::data_local_dir()
-        .ok_or("Could not find the local data directory")?
-        .join("wallpaper-changer-rs/logs");
-    if !logger_dir.exists() {
-        create_dir_all(&logger_dir)?;
-    }
-    let logger2 = DailyFileLogger::new(&logger_dir.to_string_lossy(), ftail::Config {
+    let logger2 = DailyFileLogger::new(&Paths::logs_dir().to_string_lossy(), ftail::Config {
         level_filter: LevelFilter::Debug,
         retention_days: Some(7),
         ..Default::default()
@@ -78,13 +71,25 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     log::set_max_level(LevelFilter::Trace);
 
+    let dsn = compile_env!("SENTRY_DSN");
+    let _guard = sentry::init((
+        dsn,
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            traces_sample_rate: 0.1,
+            ..Default::default()
+        },
+    ));
+
     // if the first argument is register, register a scheduled task
     if env::args().nth(1).is_some_and(|arg| arg == "register") {
+        debug!("Found register argument, registering scheduled task");
         return register_task(&env::current_exe()?);
     }
 
     // if the first argument is unregister, unregister a scheduled task
     if env::args().nth(1).is_some_and(|arg| arg == "unregister") {
+        debug!("Found unregister argument, unregistering scheduled task");
         return unregister_task(&env::current_exe()?);
     }
 
@@ -102,6 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 format!("unix:path=/run/user/{uid}/bus"),
             );
         }
+        debug!("Environment variable DBUS_SESSION_BUS_ADDRESS is set to {:?}", env::var("DBUS_SESSION_BUS_ADDRESS"));
     }
 
     // Load configuration
@@ -110,14 +116,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Load image data
     let mut image_data = image_list::ImageData::load()?;
 
-    // Get the path to the Pictures directory
-    let pictures_dir = Path::new(&config.pictures_folder);
-
     // Select a random image (local or online)
-    let image = image_list::select_random_image(&config, &mut image_data, pictures_dir)?;
+    let image = image_list::select_random_image(&config, &mut image_data)?;
 
     // Load the image
-    let img = image::open(&image.get_path()?)?;
+    let img = image::open(image.get_path())?;
 
     // Resize the background to fill the screen size
     let screen_size = get_screen_size();
@@ -132,37 +135,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
 
     // Save the modified image
-    let output_path = dirs::cache_dir()
-        .ok_or("Could not find the cache directory")?
-        .join(format!(
-            "wallpaper-changer-rs/background_{}.png",
-            // https://stackoverflow.com/a/54277357
-            rand::rng()
-                .sample_iter(&Alphanumeric)
-                .take(7)
-                .map(char::from)
-                .collect::<String>(),
-        ));
+    let output_path = Paths::temp_dir().join(
+        format!(
+            "background_{}.png",
+            chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+        )
+    );
     // Create the parent directory if needed
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
         // Find old background images and delete them
-        for entry in fs::read_dir(parent)? {
-            let path = entry?.path();
-            if path.is_file()
-                && path
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy().starts_with("background_"))
-            {
-                fs::remove_file(path)?;
-            }
-        }
+        image_data.delete_old_images()?;
     }
-    println!("Saving image in {output_path:?}...");
+    info!("Saving image in {output_path:?}...");
     background.save(&output_path)?;
 
     // Set the image as the background
+    debug!("Setting background");
     set_background::set_background(&output_path)?;
+
+    // Download all the other images
+    debug!("Downloading all other images");
+    image_data.download_all_images()?;
 
     Ok(())
 }
@@ -173,5 +167,6 @@ mod date_format;
 mod image_list;
 mod image_structs;
 mod images;
+mod paths;
 mod screen_size;
 mod set_background;
