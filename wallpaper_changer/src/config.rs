@@ -9,6 +9,7 @@ use std::fs;
 pub(crate) struct Config {
     pub(crate) api_key: String,
     pub(crate) font_size: u32,
+    pub(crate) images_per_download: u32,
     pub(crate) label_position: String,
     pub(crate) pictures_folder: String,
     pub(crate) search_terms: String,
@@ -20,6 +21,7 @@ impl Default for Config {
         Self {
             api_key: String::new(),
             font_size: 28,
+            images_per_download: 10,
             label_position: "top_right".to_string(),
             pictures_folder: dirs::picture_dir()
                 .unwrap_or_default()

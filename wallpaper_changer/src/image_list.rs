@@ -126,11 +126,11 @@ pub(crate) fn download_pictures(config: &Config) -> Result<Vec<OnlineImage>, Box
         .unwrap_or_default();
     if search_term.is_empty() || search_term == "random" {
         url.set_path(&(url.path().to_string() + "photos/random"));
-        url.query_pairs_mut().append_pair("count", "10");
+        url.query_pairs_mut().append_pair("count", config.images_per_download.to_string().as_str());
     } else {
         url.set_path(&(url.path().to_string() + "search/photos"));
         url.query_pairs_mut().append_pair("query", search_term);
-        url.query_pairs_mut().append_pair("per_page", "10");
+        url.query_pairs_mut().append_pair("per_page", config.images_per_download.to_string().as_str());
     }
 
     if !config.api_key.is_empty() {
