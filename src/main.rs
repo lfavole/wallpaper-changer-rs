@@ -1,12 +1,12 @@
 //! A program that automatically changes the wallpaper,
 //! choosing a local or online image.
+use compile_dotenv::compile_env;
 use config::Config;
 use ftail::channels::console::ConsoleLogger;
 use ftail::channels::daily_file::DailyFileLogger;
 use image::imageops::FilterType;
 use log::info;
 use log::{debug, error, LevelFilter};
-use macros::compile_env;
 use paths::Paths;
 use add_scheduled_task::{register_task, unregister_task};
 use screen_size::get_screen_size;
