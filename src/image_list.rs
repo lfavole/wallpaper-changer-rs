@@ -104,7 +104,7 @@ impl ImageData {
         Ok(())
     }
 
-    /// Deletes all the old images in the directory of the first image.
+    /// Deletes all the old online images and background images.
     ///
     /// # Errors
     /// Fails if an image can't be deleted.
@@ -120,6 +120,14 @@ impl ImageData {
                 removed_images += 1;
             } else {
                 debug!("Keeping image {:?}", path);
+            }
+        }
+        for entry in fs::read_dir(Paths::temp_dir())? {
+            let path = entry?.path();
+            if path.is_file() {
+                debug!("Removing old background image {:?}", path);
+                fs::remove_file(path)?;
+                removed_images += 1;
             }
         }
         info!("Removed {} old images", removed_images);
