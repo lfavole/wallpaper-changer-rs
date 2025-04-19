@@ -119,22 +119,24 @@ impl From<PathBuf> for LocalImage {
         } else if filename.len() == 19 && filename.chars().nth(10).unwrap() == '_' {
             // "photo_1970-01-01_00-00-00.jpg"
             date_format = Some("%Y-%m-%d_%H-%M-%S");
-        } else if filename.len() == 15 && filename[12..15] == *"-WA" {
+        } else if filename.len() == 15 && filename[9..12] == *"-WA" {
             // "IMG-19700101-WA0000.jpg"
-            filename = filename[0..12].to_string();
+            filename = filename[0..8].to_string();
             date_format = Some("%Y%m%d");
         }
 
-        let date = if let Some(format) = date_format {
+        let date: Option<DateTime<Local>> = if let Some(format) = date_format {
             debug!("Parsing date with format: {}", format);
-            DateTime::parse_from_str(&filename, format).ok().map(Into::into)
+            DateTime::parse_from_str(&filename, format).ok().map(DateTime::<Local>::from)
         } else {
+            None
+        }.or_else(|| {
             debug!("Getting file metadata");
             metadata(&path)
             .and_then(|metadata| metadata.modified())
             .ok()
-            .map(DateTime::from)
-        };
+            .map(DateTime::<Local>::from)
+        });
 
         Self { path, date }
     }
