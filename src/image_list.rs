@@ -108,7 +108,7 @@ impl ImageData {
     ///
     /// # Errors
     /// Fails if an image can't be deleted.
-    pub(crate) fn delete_old_images(&self) -> Result<(), Box<dyn Error>> {
+    pub(crate) fn delete_old_images(&self, current_background: &Path) -> Result<(), Box<dyn Error>> {
         let image_paths = self.urls.iter().map(super::image_structs::Image::get_path).collect::<Vec<_>>();
         debug!("Found {} images to keep", image_paths.len());
         let mut removed_images: usize = 0;
@@ -124,7 +124,7 @@ impl ImageData {
         }
         for entry in fs::read_dir(Paths::temp_dir())? {
             let path = entry?.path();
-            if path.is_file() {
+            if path.is_file() && path != current_background {
                 debug!("Removing old background image {:?}", path);
                 fs::remove_file(path)?;
                 removed_images += 1;

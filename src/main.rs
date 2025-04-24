@@ -144,8 +144,6 @@ fn real_main() -> Result<(), Box<dyn Error>> {
     // Create the parent directory if needed
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
-        // Find old background images and delete them
-        image_data.delete_old_images()?;
     }
     info!("Saving image in {output_path:?}...");
     background.save(&output_path)?;
@@ -153,6 +151,9 @@ fn real_main() -> Result<(), Box<dyn Error>> {
     // Set the image as the background
     debug!("Setting background");
     set_background::set_background(&output_path)?;
+
+    // Find old background images and delete them
+    image_data.delete_old_images(&output_path)?;
 
     // Download all the other images
     debug!("Downloading all other images");
