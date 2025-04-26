@@ -110,6 +110,11 @@ impl From<PathBuf> for LocalImage {
             }
         }
         filename = filename.trim_matches(['_', '-']).to_string();
+        if filename.ends_with(')') {
+            if let Some(parenthesis_start) = filename.rfind('(') {
+                filename = filename[..parenthesis_start].trim_end().to_string();
+            }
+        }
 
         let mut date_format = None;
         #[expect(clippy::unwrap_used)]
