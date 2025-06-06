@@ -1,5 +1,6 @@
 //! A program that automatically changes the wallpaper,
 //! choosing a local or online image.
+use add_scheduled_task::{register_task, unregister_task};
 use compile_dotenv::compile_env;
 use config::Config;
 use ftail::channels::console::ConsoleLogger;
@@ -8,7 +9,6 @@ use image::imageops::FilterType;
 use log::info;
 use log::{debug, error, LevelFilter};
 use paths::Paths;
-use add_scheduled_task::{register_task, unregister_task};
 use screen_size::get_screen_size;
 use sentry_log::LogFilter;
 use std::env;
@@ -31,7 +31,7 @@ impl Error for NoImagesError {}
 /// The real entry point for the program.
 fn main() {
     match real_main() {
-        Ok(()) => {},
+        Ok(()) => {}
         Err(err) => error!("Error: {err}"),
     }
 }
@@ -49,25 +49,25 @@ fn real_main() -> Result<(), Box<dyn Error>> {
         ..Default::default()
     });
 
-    let logger2 = DailyFileLogger::new(&Paths::logs_dir().to_string_lossy(), ftail::Config {
-        level_filter: LevelFilter::Debug,
-        retention_days: Some(7),
-        ..Default::default()
-    })?;
-
-    let logger3 = sentry_log::SentryLogger::new()
-        .filter(|md| match md.level() {
-            log::Level::Error => LogFilter::Exception,
-            _ => LogFilter::Breadcrumb,
-        });
-
-    log::set_boxed_logger(
-        Box::new(multi_log::MultiLogger::new(vec![
-            Box::new(logger1),
-            Box::new(logger2),
-            Box::new(logger3),
-        ]))
+    let logger2 = DailyFileLogger::new(
+        &Paths::logs_dir().to_string_lossy(),
+        ftail::Config {
+            level_filter: LevelFilter::Debug,
+            retention_days: Some(7),
+            ..Default::default()
+        },
     )?;
+
+    let logger3 = sentry_log::SentryLogger::new().filter(|md| match md.level() {
+        log::Level::Error => LogFilter::Exception,
+        _ => LogFilter::Breadcrumb,
+    });
+
+    log::set_boxed_logger(Box::new(multi_log::MultiLogger::new(vec![
+        Box::new(logger1),
+        Box::new(logger2),
+        Box::new(logger3),
+    ])))?;
 
     log::set_max_level(LevelFilter::Trace);
 
@@ -107,7 +107,10 @@ fn real_main() -> Result<(), Box<dyn Error>> {
                 format!("unix:path=/run/user/{uid}/bus"),
             );
         }
-        debug!("Environment variable DBUS_SESSION_BUS_ADDRESS is set to {:?}", env::var("DBUS_SESSION_BUS_ADDRESS"));
+        debug!(
+            "Environment variable DBUS_SESSION_BUS_ADDRESS is set to {:?}",
+            env::var("DBUS_SESSION_BUS_ADDRESS")
+        );
     }
 
     // Load configuration
@@ -135,12 +138,10 @@ fn real_main() -> Result<(), Box<dyn Error>> {
     )?;
 
     // Save the modified image
-    let output_path = Paths::temp_dir().join(
-        format!(
-            "background_{}.png",
-            chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
-        )
-    );
+    let output_path = Paths::temp_dir().join(format!(
+        "background_{}.png",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    ));
     // Create the parent directory if needed
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;

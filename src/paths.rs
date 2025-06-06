@@ -52,7 +52,7 @@ impl Paths {
                 dirs::data_local_dir()
                     .expect("Could not find the local data directory")
                     .join("wallpaper-changer-rs")
-                    .into_boxed_path()
+                    .into_boxed_path(),
             )
         })
     }
@@ -90,6 +90,8 @@ impl Paths {
 
     /// Returns the path where the pictures list for the given directory is stored.
     pub(crate) fn get_path_cache_file_path(name: &Path) -> PathBuf {
-        Self::path_cache_dir().join(name.to_string_lossy().replace(['\\', '/'], "_")).clone()
+        Self::path_cache_dir()
+            .join(name.to_string_lossy().replace(['\\', '/'], "_"))
+            .clone()
     }
 }

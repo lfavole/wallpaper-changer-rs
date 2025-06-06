@@ -1,11 +1,12 @@
 use std::error::Error;
-use std::io;
 use std::ffi::OsStr;
+use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
 extern "system" {
-    fn SystemParametersInfoW(uiAction: u32, uiParam: u32, pvParam: *const u16, fWinIni: u32) -> i32;
+    fn SystemParametersInfoW(uiAction: u32, uiParam: u32, pvParam: *const u16, fWinIni: u32)
+        -> i32;
 }
 
 const SPI_SETDESKWALLPAPER: u32 = 0x0014;
@@ -32,7 +33,11 @@ pub(crate) fn set_background(image_path: &Path) -> Result<(), Box<dyn Error>> {
     };
 
     if result == 0 {
-        return Err(format!("Could not set desktop wallpaper: {}", io::Error::last_os_error()).into());
+        return Err(format!(
+            "Could not set desktop wallpaper: {}",
+            io::Error::last_os_error()
+        )
+        .into());
     }
 
     Ok(())

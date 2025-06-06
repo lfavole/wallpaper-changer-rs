@@ -1,27 +1,25 @@
-use crate::get_screen_size;
-use crate::image_structs::Image;
-use crate::image_structs::LocalImage;
-use crate::image_structs::OnlineImage;
-use crate::paths::Paths;
+use std::error::Error;
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
 
-use super::Config;
-use super::NoImagesError;
-use image::DynamicImage;
-use image::GenericImageView;
-use image::ImageDecoder;
-use image::ImageReader;
 use log::debug;
 use log::info;
 use rand::seq::IteratorRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::error::Error;
-use std::ffi::OsStr;
-use std::fs;
-use std::path::Path;
-use std::path::PathBuf;
 
+use crate::image_structs::is_image;
+use crate::image_structs::Image;
+use crate::image_structs::LocalImage;
+use crate::image_structs::OnlineImage;
+use crate::paths::Paths;
+use super::Config;
+use super::NoImagesError;
+
+
+// Imports are OK here
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 /// Data for the online images stored on disk.
@@ -65,7 +63,10 @@ impl ImageData {
     /// Fails if the file can't be written to.
     pub(crate) fn store(&self) -> Result<(), Box<dyn Error>> {
         debug!("Storing image data to {:?}", Paths::image_data_path());
-        Ok(serde_json::to_writer(fs::File::create(Paths::image_data_path())?, self)?)
+        Ok(serde_json::to_writer(
+            fs::File::create(Paths::image_data_path())?,
+            self,
+        )?)
     }
 
     /// Deletes all the images in this [`ImageData`].
@@ -108,8 +109,15 @@ impl ImageData {
     ///
     /// # Errors
     /// Fails if an image can't be deleted.
-    pub(crate) fn delete_old_images(&self, current_background: &Path) -> Result<(), Box<dyn Error>> {
-        let image_paths = self.urls.iter().map(super::image_structs::Image::get_path).collect::<Vec<_>>();
+    pub(crate) fn delete_old_images(
+        &self,
+        current_background: &Path,
+    ) -> Result<(), Box<dyn Error>> {
+        let image_paths = self
+            .urls
+            .iter()
+            .map(super::image_structs::Image::get_path)
+            .collect::<Vec<_>>();
         debug!("Found {} images to keep", image_paths.len());
         let mut removed_images: usize = 0;
         for entry in fs::read_dir(Paths::downloaded_pictures_dir())? {
@@ -160,12 +168,14 @@ pub(crate) fn download_pictures(config: &Config) -> Result<Vec<OnlineImage>, Box
     if search_term.is_empty() || search_term == "random" {
         debug!("Search term is {:?}, getting random images", search_term);
         url.set_path(&(url.path().to_string() + "photos/random"));
-        url.query_pairs_mut().append_pair("count", config.images_per_download.to_string().as_str());
+        url.query_pairs_mut()
+            .append_pair("count", config.images_per_download.to_string().as_str());
     } else {
-        debug!("Searching for images with the term: {search_term:?}");
-        url.set_path(&(url.path().to_string() + "search/photos"));
+        debug!("Searching for random images with the term: {search_term:?}");
+        url.set_path(&(url.path().to_string() + "photos/random"));
         url.query_pairs_mut().append_pair("query", search_term);
-        url.query_pairs_mut().append_pair("per_page", config.images_per_download.to_string().as_str());
+        url.query_pairs_mut()
+            .append_pair("count", config.images_per_download.to_string().as_str());
     }
 
     if !config.api_key.is_empty() {
@@ -180,7 +190,8 @@ pub(crate) fn download_pictures(config: &Config) -> Result<Vec<OnlineImage>, Box
         response.as_array()
     } else {
         response["results"].as_array()
-    }.ok_or("Error parsing response")?
+    }
+    .ok_or("Error parsing response")?
     .iter()
     .map(OnlineImage::from)
     .collect::<Vec<_>>();
@@ -270,46 +281,4 @@ pub(crate) fn get_images(pictures_dir: &Path) -> Result<Vec<PathBuf>, Box<dyn Er
     serde_json::to_writer(cache_file, &paths)?;
 
     Ok(images)
-}
-
-/// Returns `true` if the file is an image.
-pub(crate) fn is_image(path: &Path) -> bool {
-    ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"]
-        .map(OsStr::new)
-        .contains(&path.extension().unwrap_or_default())
-}
-
-/// Opens an image file and rotates it according to its EXIF metadata.
-///
-/// # Errors
-/// Fails if the image can't be opened or if its orientation can't be determined.
-pub(crate) fn open_image(path: &Path) -> Result<DynamicImage, Box<dyn Error>> {
-    // Rotate the image according to its EXIF metadata
-    let mut decoder = ImageReader::open(path)?.into_decoder()?;
-    let orientation = decoder.orientation()?;
-    let mut image = DynamicImage::from_decoder(decoder)?;
-    image.apply_orientation(orientation);
-    Ok(image)
-}
-
-/// Returns `true` if the image is too vertical for the current screen size.
-///
-/// If the image size can't be determined, it returns `false`.
-pub(crate) fn is_too_vertical(path: &Path) -> bool {
-    #[expect(clippy::cast_precision_loss)]
-    if let Ok(img) = open_image(path) {
-        debug!("Opened image {:?}", path);
-        let dimensions = img.dimensions();
-        debug!("Image dimensions: {:?}", dimensions);
-        let screen_size = get_screen_size();
-        debug!("Screen size: {:?}", screen_size);
-
-        let ret = (dimensions.1 as f32 / dimensions.0 as f32) / (screen_size.1 as f32 / screen_size.0 as f32)
-            > 1.5;
-        debug!("Result: {}", ret);
-        ret
-    } else {
-        debug!("Couldn't open image {:?}", path);
-        false
-    }
 }
